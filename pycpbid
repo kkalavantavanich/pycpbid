@@ -1,0 +1,142 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Aug  4 18:11:56 2017
+
+@author: Kris
+"""
+
+import requests
+from io import BytesIO
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import math
+import json
+import sys
+
+#### Network Requests ####
+
+course_id = '1695'
+s = requests.Session()
+print("============ PY CP BID ============")
+print("github.com/kkalavantavanich")
+
+print("Signing in...")
+
+headers = {'Content-type': 'image/png'}
+auth= {'username':'xxxxxxxxxx', 'password':'xxxxxxxxxx'}
+if (auth.get('username') == None or auth.get('password') == None):
+    print("Authentication details not set.")
+    sys.exit(1)
+
+r1 = s.post('https://mis.cp.eng.chula.ac.th/service/?q=main/studentLogin', data=auth)
+if (r1.status_code != 200 or json.loads(r1.text)['type'] == 'error'):
+    print("Unable to sign in. Possibly wrong auth details.")
+    print("Sign-in status code: ", r1.status_code, sep="")
+    sys.exit(1)
+
+print("Getting image...")
+r2 = s.get('https://mis.cp.eng.chula.ac.th/?q=courseregister/chart&auctioncourseid=' + course_id, headers=headers)
+if (r2.status_code != 200 or r2.headers['Content-Type'] != "image/png"):
+    print("Unable to get image.")   
+    print("Image get status code: ", r2.status_code, sep="")
+    sys.exit(1)
+
+#### Image Processing ####
+
+def isColor(col_a, col_b):
+    tolerance = 1e-3
+    return math.isclose(col_a[0], col_b[0], rel_tol=tolerance) and math.isclose(col_a[1], col_b[1], rel_tol=tolerance) and math.isclose(col_a[2], col_b[2], rel_tol=tolerance)
+
+try:
+    img = mpimg.imread(BytesIO(r2.content))
+except ValueError:
+    print("Problem opening PNG file. Possibly invalid course no.")
+    sys.exit(1)
+    
+ly, lx, z = img.shape
+print("size: ", lx, " x ", ly, sep="")
+if (lx != 640 or ly != 480):
+    print("Warn: unsupported image size")
+
+ty = 24 
+y = 434
+red = [1., 0.26666668, 0.26666668]
+white = [1., 1. , 1.]
+black = [0., 0., 0.]
+
+borders = []
+reds = []
+ticks = []
+black_count = 0
+red_count = 0
+tblack_count = 0
+
+last_pixel = white
+tlast_pixel = white
+for x in range(50, 620):
+    pixel = img[y, x]
+    if (isColor(img[ty, x], black)):
+        tblack_count += 1
+    elif (isColor(img[ty, x], white)):
+        if (isColor(tlast_pixel, black)):
+            if (tblack_count == 2):
+                ticks.append(x - 1.5)
+                tblack_count = 0
+            else:
+                print("Error: tblack_count=", tblack_count)
+                
+    if (isColor(pixel, black)):
+        black_count += 1
+    elif (isColor(pixel, red)):
+        red_count += 1
+    elif (isColor(pixel, white)):
+        if (isColor(last_pixel, black)):
+            if (black_count == 2):
+                borders.append(x - 1.5)
+                black_count = 0
+            else:
+                print("Error: black_count=", black_count)
+        elif (isColor(last_pixel, red)):
+            if (red_count >= 5):
+                reds.append(x - (red_count + 1) * 0.5)
+                red_count = 0
+            else:
+                print("Error: red_count=", red_count)
+    else:
+        print("Error: Undefined Color ", pixel)
+    last_pixel = pixel
+    tlast_pixel = img[ty, x]
+    
+#### OUTPUT ####
+    
+def myround(x, base=100):
+    return int(base * math.ceil(float(x)/base))
+
+if (len(borders) > 2):
+    print("more than 2 graph borders detected")
+    sys.exit(1)
+elif (len(borders) < 1):
+    print("less than 2 graph borders detected")
+    sys.exit(1)
+width = borders[1] - borders[0]
+token = 100000 + (len(ticks) - 2) * 100000
+
+print(" > courseid:", course_id)
+print(" > range   : [0, ", token, "]", sep="")
+print(" > borders :", borders)
+print(" > reds    :", reds)
+print(" > ticks   :", ticks)
+
+data = []
+for r in reds:
+    r -= borders[0]
+    r /= width
+    r *= token
+    r = int(r)
+    data.append(r)
+
+print(" > bids    :", data)
+print("* bids accurate +-", myround(token / width, 100), "approx.")
+
+imgplot = plt.imshow(img)
+plt.show()
